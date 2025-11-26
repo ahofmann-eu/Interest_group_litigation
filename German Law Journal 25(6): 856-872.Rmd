@@ -1,0 +1,794 @@
+---
+title: "German Law Journal 25(6): 856-872"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+This document documents the data analysis contained in
+
+Andreas Hofmann (2024), Who Does and Who Does Not Engage in Strategic Litigation in European Law? German Law Journal, 25(6): 856-872. http://www.doi.org/10.1017/glj.2024.58  
+
+```{r}
+library(tidyverse)
+library(broom)
+library(nnet)
+library(systemfit)
+```
+
+The data is available for download at https://www.cigsurvey.eu/data/
+
+Read in data for Belgium
+
+```{r}
+belgium_cigs <- read_csv2(file = "BelgianSurveyOnlineFile.csv")
+```
+
+```{r}
+belgium_cigs <- belgium_cigs %>% mutate(country = "Belgium")
+```
+
+Read in data on Netherlands
+
+```{r}
+netherlands_cigs <- read_csv2(file = "DutchSurveyOnlineFile.csv")
+```
+
+```{r}
+netherlands_cigs <- netherlands_cigs %>% mutate(country = "Netherlands") 
+```
+
+Read in data on Poland
+
+```{r}
+poland_cigs <- read_csv2(file = "PLSurveyDataset.csv")
+```
+
+```{r}
+poland_cigs <- poland_cigs %>% mutate(country = "Poland") 
+```
+
+Read in data on Sweden
+
+```{r}
+sweden_cigs <- read_csv2(file = "SWESurveyOnlineFile.csv")
+```
+
+```{r}
+sweden_cigs <- sweden_cigs %>% mutate(country = "Sweden") 
+```
+
+Read in data on Lithuania
+
+```{r}
+lithuania_cigs <- read_csv2(file = "LTSurveyOnlineFile.csv")
+```
+
+```{r}
+lithuania_cigs <- lithuania_cigs %>% mutate(country = "Lithuania") 
+```
+
+Read in data on Slovenia
+
+```{r}
+slovenia_cigs <- read_csv2(file = "SLSurveyOnlineFile.csv")
+```
+
+```{r}
+slovenia_cigs <- slovenia_cigs %>% mutate(country = "Slovenia") 
+```
+
+Read in data on Portugal
+
+```{r}
+portugal_cigs <- read_csv2(file = "PTSurveyOnlineFile.csv")
+```
+
+```{r}
+portugal_cigs <- portugal_cigs %>% mutate(country = "Portugal") 
+```
+
+Read in data on Czech Republic
+
+```{r}
+czech_cigs <- read_csv2(file = "CZSurveyOnlineFile.csv")
+```
+
+```{r}
+czech_cigs <- czech_cigs %>% mutate(country = "Czech Republic") 
+```
+
+Merge data
+
+```{r}
+cigs <- bind_rows(belgium_cigs, czech_cigs, lithuania_cigs, netherlands_cigs, poland_cigs, portugal_cigs, slovenia_cigs, sweden_cigs)
+```
+
+
+The next steps create variables for analysis
+
+The group type variable was added by the CIGS team after the survey was fielded :
+
+1 "Business associations"
+2 "Professional associations
+3 "Unions" 
+4 "Identity groups" 
+5 "Cause groups" 
+6 "Leisure groups" 
+7 "Public institutions"
+8 Others
+
+```{r}
+cigs <- cigs %>% mutate(grouptype = case_when(
+  type == 1 ~ "Business association",
+  type == 2 ~ "Professional association",
+  type == 3 ~ "Union",
+  type == 4 ~ "Identity group",
+  type == 5 ~ "Cause group",
+  type == 6 ~ "Leisure group",
+  type == 7 ~ "Public institution",
+  type == 8 ~ "Other"),
+  
+  grouptype = factor(grouptype, level = c("Business association", "Professional association", "Cause group", "Identity group", "Leisure group", "Union", "Public institution", "Other")
+
+  ))
+```
+
+The following are survey items. The basic questionnaire is available here: https://www.cigsurvey.eu/wp-content/uploads/2024/03/survey_questionnaire_basic.pdf
+
+
+5. QID19 Looking at the list below: Which activities is your organization involved in? Please tick all boxes that apply  (W):
+
+Advocacy/lobbying  [q19_01] 
+(0: No; 1: Yes)
+
+```{r}
+cigs <-  cigs %>% mutate(lobby = q19_01)
+```
+
+
+12. QID09 Organizations get financial support from different sources. Please indicate the percentage of your organization’s 2015 budget that came from the various sources listed below. (Estimations of percentages are sufficient and very helpful.) (R + W)
+
+Funding from the European Union (e.g. payments from EU projects or programs) [q09_05] (Numeric)
+
+I divide the values on this item by 10 to approximate the scale of the other variables in the model.
+
+```{r}
+cigs <- cigs %>% mutate(
+  eubudget = q09_05,
+  eubudget10 = eubudget/10
+)
+```
+
+
+19. QID10 Does your organization have any of the following? Please tick all boxes that apply (R):
+
+In-house legal experts [q10_06] 
+(0: No; 1: Yes)
+
+```{r}
+cigs <- cigs %>% mutate(lawyer = (q10_06))
+```
+
+
+28. QID21 How many paid staff (full time equivalent), externally paid professionals, interns/trainees or unpaid volunteers work in your organization? Please note the number below:
+
+Paid staff (full time equivalent) [q21_01] (Numeric)
+
+```{r}
+cigs <- cigs %>% mutate(
+  staff = q21_01,
+  logstaff = log(staff + 1),
+)
+```
+
+
+42. QID35 During the last 12 months, how often has your organization been involved in any of the following activities? Please tick one box in every row. (R+W)
+
+We did not do this (1)
+At least once (2)
+At least once every three months (3)
+At least once a month (4)
+At least once a week (5)
+
+
+Established coalitions with like-minded organizations [q35_02]
+
+```{r}
+cigs <- cigs %>% mutate(coalition = q35_02)
+```
+
+
+43. QID36 During the past three years, did your organization initiate or in other ways contribute to legal proceedings, in order to claim rights and/or promote your organization’s goals? [q36]
+
+Yes  (1) 
+No (2)
+Do not know (3)
+
+recoded to 0 = "No", 1= "Yes", NA = "Do not know"
+
+```{r}
+cigs <- cigs %>% mutate(litigate = case_when(
+  q36 == 1 ~ "yes",
+  q36 == 2 ~ "no",
+  q36 == 3 ~ NA,
+  TRUE ~ NA),
+  
+  litigate = factor(litigate)
+  )
+```
+
+
+
+46. QID64 Did the issues at stake in these proceedings concern the relationship between [COUNTRY] and international/European law? [q64]
+       
+Yes (1)
+No (2)
+Do not know (3)
+
+I treat "Do not know" as "No".
+I also treat (q36 == 1 & q64 == NA) as "No".
+
+
+```{r}
+cigs <- cigs %>% mutate(int_litigate = case_when(
+  q64 == 1 ~ "yes",
+  q64 == 2 ~ "no",
+  q64 == 3 ~ "no",
+  q36 == 1 & q64 == NA ~ "no",
+  TRUE ~ NA
+))
+```
+
+```{r}
+cigs <- cigs %>% mutate(type_litigate = case_when(
+    litigate == "no" ~ "did not litigate",
+    int_litigate == "yes" ~ "European law",
+    int_litigate == "no" ~ "national law",
+    litigate == "yes" & is.na(int_litigate) ~ "national law"),
+
+    type_litigate =  factor(type_litigate)
+)
+```
+
+
+47. QID66 (FILTER9) If the proceedings have already led to rulings, how well would you say that these rulings satisfy the goals of your organization? [q66]
+
+Not well at all (1) 
+Not very well (2) 
+Neither (3) 
+Somewhat well (4) 
+Very well (5)
+
+```{r}
+cigs <- cigs %>% mutate(satisfied = q66)
+```
+
+
+50. QID40 Interactions between civil society actors and policymakers can be initiated by either side. On average, how often does your organization initiate contact with policymakers and how often do policymakers initiate contact with your organization? Please tick one box in every row.
+
+Never (1)
+At least once (2)
+At least once every three months (3)
+At least once a month (4)
+At least once a week (5)
+
+Policymakers contact your organization [q40_02]
+
+```{r}
+cigs <- cigs %>% mutate(contact = q40_02)
+```
+
+
+52. QID41 Policies originating from the European Union have a different level of importance for different
+organizations. How important are these policies for your organization? EU policies are... [q41]
+
+the most important focus. (1)
+an important focus. (2)
+a less important focus, other areas take more of our time. (3)
+of no importance whatsoever (4)
+
+I reverse the coding for this question so that a greater number denotes greater focus on EU policy.
+
+Unfortunately, this question is missing from the Swedish survey.
+For all observations from Sweden, I use an alternative measure based on QID30.
+
+QID30 Thinking generally about all the advocacy/lobbying work your organization undertakes,
+approximately what percentage of your organization’s time is spent at the (sub)-national, national,
+European or international/global level? Please note that the total should add up to 100%
+
+European [q30_04]
+
+I divide the values on this variable by 25 to match the 5-point scale of QID41
+
+```{r}
+cigs <- cigs %>% mutate(
+  eu_focus = case_when(
+    q41 == 1 ~ 4,
+    q41 == 2 ~ 3,
+    q41 == 3 ~ 2,
+    q41 == 4 ~ 1),
+  
+  eu_focus_alt = case_when(
+    country != "Sweden" & q41 == 1 ~ 4,
+    country != "Sweden" & q41 == 2 ~ 3,
+    country != "Sweden" & q41 == 3 ~ 2,
+    country != "Sweden" & q41 == 4 ~ 1,
+    country == "Sweden" ~ q30_04/25
+    )
+    
+  )
+```
+
+
+
+54. QID43 In general, how would you characterize the relationship between your organization and European and national authorities? Please tick one box in each row.
+
+Very co-operative (1)
+Moderately co-operative (2)
+Moderately conflictual (3)
+Very conflictual (4)
+Not applicable (5)
+
+Recoded 5 = NA
+Alternative 5 = 2.5
+
+National authorities [q43_02]
+
+More than 600 respondents chose 5 (not applicable) for this question. In order to retain the original number of observations, I use an alternative coding were 5 indicates a neutral position vis-á-vis national authorities, which I recoded as 2.5, the mid-point on the scale from 1 to 4.
+
+```{r}
+cigs <-  cigs %>% mutate(
+  nat_conflict = case_when(
+    q43_02 == 5 ~ NA,
+    TRUE ~ q43_02),
+  
+  nat_conflict_alt = case_when(
+    q43_02 == 5 ~ 2.5,
+    TRUE ~ q43_02)
+)
+```
+
+
+QID58 One way of achieving your goals is by becoming a member of a European or international interest
+organizations or network. Are you member of one or more European / international organizations or
+networks? [q58]
+Yes (FILTER3) (1)
+No (0)
+
+```{r}
+cigs <- cigs %>% mutate(int_network = q58)
+```
+
+
+I reduce the dataset to the relevant variables
+
+```{r}
+glj <- cigs %>% select(
+  country, grouptype,
+  type_litigate, litigate, satisfied,
+  logstaff, lawyer, coalition, lobby,
+  eubudget10, int_network, eu_focus, eu_focus_alt,
+  nat_conflict, nat_conflict_alt,
+  contact
+)
+```
+
+```{r}
+glj_no_na <- glj %>% drop_na(
+  country, grouptype,
+  type_litigate, litigate,
+  logstaff, lawyer, coalition, lobby,
+  eubudget10, int_network, eu_focus_alt, nat_conflict_alt,
+  contact
+)
+```
+
+
+--------
+
+What follows is the ANALYSIS
+
+Figure 1. Strategic litigation by type of interest
+
+```{r}
+p <- ggplot(data = glj_no_na %>%
+              filter(grouptype %in% c("Business association", "Professional association","Cause group", "Union")) %>%
+              mutate(grouptype = fct_relevel(grouptype, "Business association", "Professional association","Cause group", "Union")) %>%
+              mutate(type_litigate = fct_relevel(type_litigate, "did not litigate", "national law", "European law")) %>%
+              group_by(grouptype, type_litigate) %>%
+              summarise(N = n()) %>%
+              mutate(perc = N / sum(N)), 
+            mapping = aes(x = grouptype, y = N, color = type_litigate))
+
+p + geom_col()  + labs (x = "", y = "Frequency", color = "") +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "top")
+```
+
+```{r}
+p <- ggplot(data = glj_no_na %>%
+              filter(grouptype %in% c("Business association", "Professional association","Cause group", "Union")) %>%
+              mutate(grouptype = fct_relevel(grouptype, "Business association", "Professional association","Cause group", "Union")) %>%
+              mutate(type_litigate = fct_relevel(type_litigate, "did not litigate", "national law", "European law")) %>%
+              group_by(grouptype, type_litigate) %>%
+              summarise(N = n()) %>%
+              mutate(perc = N / sum(N)), 
+            mapping = aes(x = grouptype, y = perc, color = type_litigate))
+
+p + geom_col()  + labs (x = "", y = "Percentage", color = "") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "none")
+```
+
+
+Figure 2. Strategic litigation by country of origin
+
+```{r}
+p <- ggplot(data = glj_no_na %>%
+              mutate(type_litigate = fct_relevel(type_litigate, "did not litigate", "national law", "European law")) %>%
+              group_by(country, type_litigate) %>%
+              summarise(N = n()) %>%
+              mutate(perc = N / sum(N)),               , 
+            mapping = aes(x = country, y = N, color = type_litigate))
+
+p + geom_col()  + labs (x = "", y = "Frequency", color = "") +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "top")
+```
+
+```{r}
+p <- ggplot(data = glj_no_na %>%
+              mutate(type_litigate = fct_relevel(type_litigate, "did not litigate", "national law", "European law")) %>%
+              group_by(country, type_litigate) %>%
+              summarise(N = n()) %>%
+              mutate(perc = N / sum(N)*100),               , 
+            mapping = aes(x = country, y = perc, color = type_litigate))
+
+p + geom_col()  + labs (x = "", y = "Percentage", color = "") +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "none")
+```
+
+
+Figure 3. Regression results for actor level characteristics
+
+```{r}
+MN_data <- glj_no_na %>% 
+  select(type_litigate, logstaff, lawyer, contact, int_network, coalition, lobby, eubudget10, 
+         eu_focus_alt, nat_conflict_alt, grouptype, country) %>%
+  drop_na()
+```
+
+```{r}
+
+mn_model <-  multinom(type_litigate ~ logstaff + lawyer + contact + int_network + coalition + lobby + eubudget10 + eu_focus_alt + nat_conflict_alt + grouptype + country, data = MN_data)
+```
+
+```{r}
+tidy_mn <- tidy(mn_model, conf.int = TRUE)
+```
+
+```{r}
+tidy_mn <- tidy_mn %>% mutate(variable = case_when(
+  term == "nat_conflict_alt" ~ "conflict with policymakers",
+  term == "logstaff" ~ "full-time staff (log)",
+  term == "lawyer" ~ "in-house lawyer",
+  term == "int_network" ~ "member of European network",
+  term == "coalition" ~ "established coalitions",
+  term == "eubudget10" ~ "EU funding",
+  term == "eu_focus_alt" ~ "EU focus",
+  term == "lobby" ~ "engaged in lobbying",
+  term == "contact" ~ "contacted by policymakers"),
+  
+  variable = fct_relevel(variable, c("conflict with policymakers", "contacted by policymakers", "member of European network", "EU focus", "EU funding", "established coalitions", "in-house lawyer", "full-time staff (log)", "engaged in lobbying"))
+  )
+
+```
+
+
+```{r}
+p <-ggplot(data = tidy_mn %>%
+             filter(term %in% c("logstaff", "lawyer", "contact", "int_network", 
+                                "coalition", "lobby", "eubudget10", "eu_focus_alt",
+                                "nat_conflict_alt")), 
+           mapping = aes(x = variable, y = estimate, ymin = conf.low, ymax = conf.high, color = y.level))
+
+p + geom_pointrange(position=position_dodge(width=1)) + 
+  scale_y_continuous(breaks=seq(-1,1.5,0.5)) + 
+  coord_flip() + 
+  labs (x = "", y = "log odds", color = "Type of litigation") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "top")
+```
+
+
+Here is an alternative specification for Figure 3 that uses "litigation based on national law" as the reference category. This specification highlights differences in the effects of predictors for litigation based on different sources of law. 
+
+```{r}
+MN_nat<- glj_no_na %>% 
+  select(type_litigate, logstaff, lawyer, contact, int_network, coalition, lobby, eubudget10, 
+         eu_focus_alt, nat_conflict_alt, grouptype, country) %>%
+  drop_na() %>%
+  mutate(type_litigate = fct_relevel(type_litigate, "national law"))
+```
+
+```{r}
+
+mn_nat <-  multinom(type_litigate ~ logstaff + lawyer + contact + int_network + coalition + lobby + eubudget10 + eu_focus_alt + nat_conflict_alt + grouptype + country, data = MN_nat)
+```
+
+```{r}
+tidy_mn_nat <- tidy(mn_nat, conf.int = TRUE)
+```
+
+```{r}
+tidy_mn_nat <- tidy_mn_nat %>% mutate(variable = case_when(
+  term == "nat_conflict_alt" ~ "conflict with policymakers",
+  term == "logstaff" ~ "full-time staff (log)",
+  term == "lawyer" ~ "in-house lawyer",
+  term == "int_network" ~ "member of European network",
+  term == "coalition" ~ "established coalitions",
+  term == "eubudget10" ~ "EU funding",
+  term == "eu_focus_alt" ~ "EU focus",
+  term == "lobby" ~ "engaged in lobbying",
+  term == "contact" ~ "contacted by policymakers"),
+  
+  variable = fct_relevel(variable, c("conflict with policymakers", "contacted by policymakers", "member of European network", "EU focus", "EU funding", "established coalitions", "in-house lawyer", "full-time staff (log)", "engaged in lobbying"))
+  )
+
+```
+
+
+```{r}
+p <-ggplot(data = tidy_mn_nat %>%
+             filter(term %in% c("logstaff", "lawyer", "contact", "int_network", 
+                                "coalition", "lobby", "eubudget10", "eu_focus_alt",
+                                "nat_conflict_alt")) %>%
+             mutate(y.level = fct_relevel(y.level, "European law")),
+           mapping = aes(x = variable, y = estimate, ymin = conf.low, ymax = conf.high, color = y.level))
+
+p + geom_pointrange(position=position_dodge(width=1)) + 
+  scale_y_continuous(breaks=seq(-1,1.5,0.5)) + 
+  coord_flip() + 
+  labs (x = "", y = "log odds", color = "Type of litigation") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "top")
+```
+
+
+Figure 4. Satisfaction with strategic litigation outcomes
+
+```{r}
+glm_model <- lm(satisfied ~ type_litigate + logstaff + lawyer + contact + int_network + coalition + lobby + eubudget10 + eu_focus_alt + nat_conflict_alt + grouptype + country, data = glj_no_na)
+summary(glm_model)
+```
+
+```{r}
+tidy_m2 <- tidy(glm_model, conf.int = TRUE)
+```
+
+```{r}
+tidy_m2 <- tidy_m2 %>% mutate(variable = case_when(
+  term == "type_litigatenational law" ~ "national vs European law",  
+  term == "nat_conflict_alt" ~ "conflict with policymakers",
+  term == "logstaff" ~ "full-time staff (log)",
+  term == "lawyer" ~ "in-house lawyer",
+  term == "int_network" ~ "member of European network",
+  term == "coalition" ~ "established coalitions",
+  term == "eubudget10" ~ "EU funding",
+  term == "eu_focus_alt" ~ "EU focus",
+  term == "lobby" ~ "engaged in lobbying",
+  term == "contact" ~ "contacted by policymakers"),
+  
+  variable = fct_relevel(variable, c("national vs European law", "conflict with policymakers", "contacted by policymakers", "member of European network", "EU focus", "EU funding", "established coalitions", "in-house lawyer", "full-time staff (log)", "engaged in lobbying"))
+  )
+
+```
+
+```{r}
+p <-ggplot(data = tidy_m2 %>%
+             filter(term %in% c("type_litigatenational law", "logstaff", "lawyer", "contact", "int_network", 
+                                "coalition", "lobby", "eubudget10", "eu_focus_alt",
+                                "nat_conflict_alt", "litigatenational law")) %>%
+             mutate(number = "one"), 
+           mapping = aes(x = variable, y = estimate, ymin = conf.low, ymax = conf.high, color = number))
+
+p + geom_pointrange(position=position_dodge(width=1)) + 
+  scale_y_continuous(breaks=seq(-0.5,1,0.5)) + 
+  coord_flip() + 
+  labs (x = "", y = "coefficient", color = "") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "none")
+```
+
+
+------------------
+
+Here are two alternative models for Figure 3. 
+
+The first uses the original values on the variables 'nat_conflict' and 'eu_focus'. This deletes all observations from Sweden and several hundred other respondents that assigned the value 5 to QID43. This reduces the N from 2834 to 1701. 
+
+This does not substantively change the results. There are two differences: 
+
+- engaging in lobbying is no longer a statistically significant predictor of engaging in (any) litigation 
+
+- being contacted by policy-makers is no longer a statistically significant predictor of engaging in litigation based on European law. 
+
+I interpret the latter as underlining that a lack of quality contact with national policy-makers is a strong predictor of a litigation strategy based in European law. 
+
+
+```{r}
+MN_alt <- glj %>% 
+  select(type_litigate, logstaff, lawyer, contact, int_network, coalition, lobby, eubudget10, 
+         eu_focus, nat_conflict, grouptype, country) %>%
+  drop_na()
+```
+
+```{r}
+
+mn_model_alt <-  multinom(type_litigate ~ logstaff + lawyer + contact + int_network + coalition + lobby + eubudget10 + eu_focus + nat_conflict + grouptype + country, data = MN_alt)
+```
+
+```{r}
+tidy_mn_alt <- tidy(mn_model_alt, conf.int = TRUE)
+```
+
+```{r}
+tidy_mn_alt <- tidy_mn_alt %>% mutate(variable = case_when(
+  term == "nat_conflict" ~ "conflict with policymakers",
+  term == "logstaff" ~ "full-time staff (log)",
+  term == "lawyer" ~ "in-house lawyer",
+  term == "int_network" ~ "member of European network",
+  term == "coalition" ~ "established coalitions",
+  term == "eubudget10" ~ "EU funding",
+  term == "eu_focus" ~ "EU focus",
+  term == "lobby" ~ "engaged in lobbying",
+  term == "contact" ~ "contacted by policymakers"),
+  
+  variable = fct_relevel(variable, c("conflict with policymakers", "contacted by policymakers", "member of European network", "EU focus", "EU funding", "established coalitions", "in-house lawyer", "full-time staff (log)", "engaged in lobbying"))
+  )
+
+```
+
+
+```{r}
+p <-ggplot(data = tidy_mn_alt %>%
+             filter(term %in% c("logstaff", "lawyer", "contact", "int_network", 
+                                "coalition", "lobby", "eubudget10", "eu_focus",
+                                "nat_conflict")), 
+           mapping = aes(x = variable, y = estimate, ymin = conf.low, ymax = conf.high, color = y.level))
+
+p + geom_pointrange(position=position_dodge(width=1)) + 
+  scale_y_continuous(breaks=seq(-1,1.5,0.5)) + 
+  coord_flip() + 
+  labs (x = "", y = "log odds", color = "Type of litigation") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "top")
+```
+
+
+The second alternative model is a 'seemingly unrelated regression' instead of a multinomial regression. I run this specification on the initial data (N = 2834).
+
+Again, the results are substantively similar, except that in this model specification 
+
+- engaging in lobbying is no longer a statistically significant predictor of engaging in litigation based on European law
+
+- full-time staff becomes a statistically significant predictor of engaging in litigation based on national law
+
+I interpret this as underlining that domestically disadvantaged groups are more likely to turn to a litigation strategy based in European law.
+
+```{r}
+SUR_data <- glj %>% 
+  select(type_litigate, logstaff, lawyer, contact, int_network, coalition, lobby, eubudget10, 
+         eu_focus_alt, nat_conflict_alt, grouptype, country) %>%
+  drop_na()
+```
+
+```{r}
+SUR_data <- SUR_data %>% mutate(
+  nat_litigate = if_else(type_litigate == "national law", 1, 0),
+  EU_litigate  = if_else(type_litigate == "European law", 1, 0))
+```
+
+
+```{r}
+eq1 <- nat_litigate ~ logstaff + lawyer + contact + int_network + coalition + lobby + eubudget10 + eu_focus_alt + nat_conflict_alt + grouptype + country
+
+eq2 <- EU_litigate ~ logstaff + lawyer + contact + int_network + coalition + lobby + eubudget10 + eu_focus_alt + nat_conflict_alt + grouptype + country
+
+```
+
+```{r}
+sur_model <- systemfit(list(nat = eq1, eur = eq2), data = SUR_data, method = "SUR")
+
+summary(sur_model)
+```
+
+```{r}
+tidy_sur <- tidy(sur_model, conf.int = TRUE)
+```
+
+```{r}
+tidy_sur <- tidy_sur %>% mutate(
+  equation = substr(term, 1, 3),
+  law = if_else(equation == "nat", "national law", "European law"),
+  term2 = str_sub(term, 5, -1)
+)
+```
+
+```{r}
+tidy_sur <- tidy_sur %>% mutate(variable = case_when(
+  term2 == "nat_conflict_alt" ~ "conflict with policymakers",
+  term2 == "logstaff" ~ "full-time staff (log)",
+  term2 == "lawyer" ~ "in-house lawyer",
+  term2 == "int_network" ~ "member of European network",
+  term2 == "coalition" ~ "established coalitions",
+  term2 == "eubudget10" ~ "EU funding",
+  term2 == "eu_focus_alt" ~ "EU focus",
+  term2 == "lobby" ~ "engaged in lobbying",
+  term2 == "contact" ~ "contacted by policymakers"),
+  
+  variable = fct_relevel(variable, c("conflict with policymakers", "contacted by policymakers", "member of European network", "EU focus", "EU funding", "established coalitions", "in-house lawyer", "full-time staff (log)", "engaged in lobbying"))
+  )
+
+```
+
+```{r}
+p <-ggplot(data = tidy_sur %>%
+             filter(term2 %in% c("logstaff", "lawyer", "contact", "int_network", 
+                                "coalition", "lobby", "eubudget10", "eu_focus_alt",
+                                "nat_conflict_alt")), 
+           mapping = aes(x = variable, y = estimate, ymin = conf.low, ymax = conf.high, color = law))
+
+p + geom_pointrange(position=position_dodge(width=1)) + 
+  scale_y_continuous(breaks=seq(-3,3,1)) + 
+  coord_flip() +
+  labs (x = "", y = "log odds", color = "Type of litigation") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) +
+  theme(axis.text.x = element_text(size = 10, angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "top")
+```
